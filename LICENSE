@@ -1,0 +1,34 @@
+Ghi chú giấy phép — kho mochi-skills
+
+Repo này tổng hợp skill từ nhiều repo gốc khác nhau, mỗi repo có giấy phép
+riêng. Không có một giấy phép chung duy nhất cho toàn bộ repo này.
+
+- Mỗi thư mục skill đều kèm file LICENSE gốc của repo mà skill đó lấy từ đó.
+  Giấy phép trong thư mục skill là giấy phép áp dụng cho các file trong thư
+  mục đó — tuân theo giấy phép đó khi dùng lại, phân phối lại hay sửa đổi.
+- Các file README.md, CACH-DUNG.md, THAM-KHAO.md, NGUON.md và file ghi chú
+  này do người tổng hợp tự viết ngày 25/11/2026, phát hành theo giấy phép
+  MIT (xem bên dưới) — trừ các trích dẫn ngắn từ file SKILL.md gốc (thuộc
+  giấy phép của repo gốc tương ứng).
+
+MIT License (áp dụng cho các file tài liệu/chỉ mục do người tổng hợp tự viết)
+
+Copyright (c) 2026 Nien7979
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
