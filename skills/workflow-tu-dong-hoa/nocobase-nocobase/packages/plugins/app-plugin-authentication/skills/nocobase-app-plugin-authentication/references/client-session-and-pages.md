@@ -1,0 +1,208 @@
+# Client session and pages
+
+## Reading the session
+
+`useAuthentication()` works anywhere under the application shell:
+
+```tsx
+import { useAuthentication } from '@nocobase/app-plugin-authentication/client';
+
+export function Greeting(): ReactElement | null {
+  const { session, isPending } = useAuthentication();
+  if (isPending || !session) return null;
+  return <span>{session.user.name}</span>;
+}
+```
+
+- `session` is `null` while anonymous; `session.user` has `id`, `name`,
+  `email`, `username`, `image`, and `emailVerified`.
+- `isPending` is true until the first `getSession()` completes and during any
+  `refresh()`. Render nothing or a placeholder while pending; do not treat
+  pending as anonymous.
+- `refresh()` re-reads the session from the server. Call it after any action
+  that changes the session outside the provided hooks.
+- `client` is the Better Auth client. Every Better Auth client plugin
+  configured in `client/config/auth.ts` is available on it.
+
+The provider does not poll and does not listen for revocation. A session
+revoked on the server is noticed at the next `refresh()` or when an API call
+returns `401`; treat that `401` as "sign in again", not as an application
+error.
+
+## Signing out
+
+There is no sign-out hook. Call the client and refresh:
+
+```ts
+const { client, refresh } = useAuthentication();
+await client.signOut();
+await refresh();
+```
+
+The application shell's user menu already does this. Reuse it rather than
+adding a second sign-out path.
+
+## Guarding pages
+
+Routes declare their mode in `client/routes.ts`:
+
+- `auth: 'required'` renders inside `RequiredAuthentication`; an anonymous
+  visitor is redirected to `/login`.
+- `auth: 'guest'` renders inside `GuestAuthentication`; a signed-in visitor is
+  redirected to the in-application path in the page's `redirect` search parameter, such as `/login?redirect=%2Fdevice%3Fuser_code%3DWDJBMJHT`, and to `/` without one.
+- `auth: 'optional'` renders for everyone.
+
+The plugin fixes the `/login` target and the `/` default. A page that needs the person to come back after signing in sends them to `/login?redirect=<its own path and query>`, as the templates' `/device` page does; an application that needs a different landing page redirects again from `/` or from the login page's success path; it does not fork the guard. Wrap a subtree yourself with
+`AuthenticationGuard({ mode })` only outside the routed tree.
+
+A guard is navigation. Every endpoint the page calls authenticates on its own;
+see [protecting routes](protecting-routes.md).
+
+## Client configuration
+
+`client/config/auth.ts` holds Better Auth client options. Its `plugins` must
+mirror the server's: the template pairs `username()` on the server with
+`usernameClient()` here. Adding a server plugin that has a client counterpart
+means adding both, or the client will lack the typed methods and the plugin's
+request handling.
+
+The base URL is derived from the application's public path and must not be
+set here.
+
+## Where the pages live
+
+The plugin ships no sign-in pages; it registers only the two [settings pages](#the-settings-pages). The application declares four guest routes and
+owns their components:
+
+```text
+client/routes.ts                        /login /register /forgot-password /reset-password
+client/pages/auth/*.tsx                 one page per route: wires a form to its headless action
+client/pages/auth/shared.tsx            AuthPage: logo, name and the brand panel every page shares
+client/extensions/nocobase-auth-forms/         four presentational password forms
+client/extensions/nocobase-auth-methods/       method tabs and SSO buttons
+client/extensions/nocobase-auth-split-layout/  the page frame, with an aside slot
+client/pages/auth/device.tsx                    /device: approves a CLI's sign-in (see better-auth-plugins.md)
+client/extensions/nocobase-device-approval/     the approval page's block, wired to the plugin's client
+```
+
+The `device-approval` block is the exception: it calls Better Auth's device endpoints through `useAuthentication()` and translates its own `deviceApproval.*` keys; [enabling an official Better Auth plugin](better-auth-plugins.md#device-login-for-a-cli) covers it. The other components come from the NocoBase UI Library and are presentational: they call no plugin API and take every string as a prop with an English default. The pages own the wiring and the translations. Customize the pages and `shared.tsx` first; prefer the components' props and slots, and when they cannot express the change, write a new component under `client/components/auth/` and import it from the page. Edit the installed components only if explicitly requested or composition is impractical, and explain the reason. Preserve original pages and components when disabling a feature so it can be re-enabled without reconstruction.
+
+### Changing text, branding, or layout
+
+`AuthPage` in `client/pages/auth/shared.tsx` renders `AuthSplitLayout` with the application's `logo`, `name`, and the brand panel as `aside`, shown from the `xl` breakpoint up; change them there so all four pages follow. Each page passes its `title` and `description`, and the form's `labels`, from `t()` under `auth.*` in `client/locales/`. For a centred card without a panel, install `auth-centered-layout` from the UI Library and render `AuthCenteredLayout` in `AuthPage` instead.
+
+### Wiring a form
+
+Each form calls `onSubmit(values)` and renders `submitting`, `error`, and `fieldErrors`; links go in `footer` (and `forgotPasswordLink` on the login form):
+
+```tsx
+const login = usePasswordLogin();
+
+<PasswordLoginForm
+  error={login.error?.message}
+  forgotPasswordLink={<Link to='/forgot-password'>{t('auth.forgotLink')}</Link>}
+  labels={{ identifier: t('auth.identifier'), submit: t('auth.signIn') }}
+  onSubmit={login.submit}
+  submitting={login.isPending}
+/>;
+```
+
+### Offering more than one sign-in method
+
+The login page renders its form through `AuthMethods`. Add a method to `methods` to get a tab per method, and SSO buttons with `providers`:
+
+```tsx
+<AuthMethods
+  methods={[
+    {
+      id: 'password',
+      label: t('auth.password'),
+      content: <PasswordLoginForm {...passwordProps} />,
+    },
+    { id: 'ldap', label: 'LDAP', content: <LdapLoginForm /> },
+  ]}
+  providers={[
+    {
+      id: 'github',
+      label: 'GitHub',
+      icon: <GitHubIcon />,
+      onClick: signInWithGitHub,
+    },
+  ]}
+/>
+```
+
+A provider has `id`, `label`, and either `onClick` or `href`, plus optional `icon` and `disabled`; from three providers on the buttons become a row of icons. Keep the sign-in call itself in an application module such as `client/auth/<provider>/`, and have the button call it; see [adding sign-in methods](adding-sign-in-methods.md).
+
+### Writing a custom form
+
+Place custom forms in `client/components/auth/` and update the consuming page import. Preserve the original forms.
+
+Compose the headless action instead of calling the client by hand:
+
+```tsx
+import { usePasswordLogin } from '@nocobase/app-plugin-authentication/client/actions';
+
+const { submit, isPending, error } = usePasswordLogin();
+await submit({ identifier, password });
+```
+
+- `usePasswordLogin` routes an identifier containing `@` to email sign-in and
+  anything else to username sign-in, then refreshes the session.
+- `usePasswordRegistration` takes `{ name, email, username, password }` and exposes `isSuccess` after the request is accepted and the session refresh completes. This confirms neither account creation nor email delivery. Use the refreshed session for signed-in navigation. When still signed out, show neutral sign-in/recovery guidance: Better Auth may simulate success for an existing email. Never infer creation from a user object or `token: null`.
+- `usePasswordResetRequest` takes `{ email }` and exposes `isSuccess`; it
+  sends the user back to the application's `/reset-password` route.
+- `usePasswordReset` takes `{ token, password }` and exposes `isSuccess`; show a success status and stop offering another submission when it is true.
+
+`error.message` is the message Better Auth returned, already safe to show.
+Navigation after success belongs to the form; the built-in forms use ordinary
+relative links and the router.
+
+### Turning registration off
+
+Set `auth.emailAndPassword.disableSignUp: true` in `config.yml`. The server then refuses password registration, and because `server/config/auth.ts` declares the section with `defineAuthConfig`, the value is published to the browser, where `useSignUpAvailable()` from `@nocobase/app-plugin-authentication/client` reads it. The templates' `PasswordLoginForm` hides its sign-up link and `client/pages/auth/register.tsx` redirects to `/login` while it returns `false`; no client configuration needs to change. Keep the registration page, form and route so that setting the value back restores registration.
+
+If `server/config/auth.ts` still uses a plain `defineAppConfig`, the server refuses sign-up but the browser keeps showing it, and the plugin logs a warning at startup; switch it to `defineAuthConfig({ defaults: { ... } })`. A custom login form gates its link with `useSignUpAvailable()` or the form's `showSignUpLink` prop; do not hide a link with CSS. Verify that the link is gone, `/register` redirects, and a direct `POST /api/auth/sign-up/email` fails without creating an account; `pnpm nocobase config check --json` shows the published value under `public`. Other self-provisioning methods, such as social sign-in, need their own policy if the user intends to disable all account creation rather than password self-registration alone.
+
+### Password reset
+
+Configure application `mailers` through `defineMailersConfig` and optionally select one with `auth.passwordReset.mailer` through `defineAuthConfig`, set `app.publicOrigin` to the externally reachable origin, and explicitly set `auth.passwordReset.enabled: true`. Authentication creates its own sender from the application's mailer configuration, with bounded background work and separate SMTP connections; no notification plugin, mailbox plugin, host MailerProvider, delivery record or persistent retry queue is needed. `auth.passwordReset.template` can override the default bilingual text/HTML message in TypeScript. Automatic recovery is off by default and defaults to revoking old sessions, unless `emailAndPassword.revokeSessionsOnPasswordReset` explicitly says otherwise. A custom `emailAndPassword.sendResetPassword` takes precedence and remains available when the switch is absent; explicit `passwordReset.enabled: false` or disabled password sign-in closes every reset endpoint, including custom senders. Invalid explicit `auth.email` fails configuration checks, even when a custom sender takes precedence; failures and unknown submissions never trigger a fallback or resend. See [authentication email configuration](authentication-email.md) for deployment examples, environment variables and legacy migration. See [user lifecycle and deployment](user-lifecycle-and-deployment.md) for other email callbacks. The public `GET /api/authentication/capabilities` endpoint reports whether password reset is available; use `usePasswordResetCapability()` to show the forgot-password link only when the server returns `true`, and keep direct page access closed while it is false or unknown.
+
+## Testing components
+
+Component tests stub the client rather than a network. Register a fake under
+`authenticationClientToken` whose `getSession()` resolves the session you
+want, mount `AuthenticationProvider`, and render the component. Tests of the
+auth pages mock the `client/actions` module instead, asserting what `submit`
+was called with. The template's own client tests show both patterns.
+
+Reset requests always use an account-independent limit of three per minute per client. The production authentication route passes the host's real connection peer to `Auth.handler`; headers alone cannot identify a client. Forwarded addresses are considered only through explicitly configured `auth.advanced.ipAddress.trustedProxies` and `ipAddressHeaders`, with the actual peer anchoring the chain. Without trusted connection metadata, including direct server API calls, requests share a conservative bucket. A custom HTTP mount forwards `{ clientAddress: getClientAddress(context) }` to `Auth.handler`, using `getClientAddress` from `@nocobase/app-server/router` rather than reading forwarding headers itself.
+
+Automatic recovery requires `app.publicOrigin` (or `APP_PUBLIC_ORIGIN`) to be configured so credential links cannot be derived from a client-controlled `Host`. A direct `Auth` consumer supplies a static HTTP(S) `baseURL` without credentials, query or fragment, or Better Auth's explicitly restricted `baseURL.allowedHosts`. Existing custom senders retain their prior configuration behavior and remain responsible for their own link policy.
+
+### Registration feedback and defaults
+
+Both application templates default to `emailAndPassword.autoSignIn: true`: a new account signs in immediately, and an existing email returns an explicit error. This exposes whether an email is registered, as in Better Auth’s default flow. Applications requiring email enumeration protection can explicitly keep `autoSignIn: false` and configure email verification with `emailVerification.sendVerificationEmail`, or `emailAndPassword.onExistingUserSignUp` to notify the email owner. Existing explicit configuration overrides the template default and is never migrated automatically. `defineAuthConfig` warns at startup when password registration is allowed with automatic sign-in off and neither verification nor an existing-user callback.
+
+Unsigned-in registration responses need neutral feedback and a sign-in or recovery link. Show verification instructions only for an actual configured flow, and promise an email only when the application can confirm it was sent. The templates do not publish verification or notification settings and therefore make no email-delivery promise.
+
+## The settings pages
+
+The plugin registers two settings pages; the application declares neither and keeps no copy of them.
+
+- **Sign-in and authentication**, System settings › Accounts (`/settings/authentication`), for whoever is granted the `authentication.settings` settings item's `read` action. It reads `GET /api/authentication/settings` and shows the effective values, each with its source (environment variable, `config.yml`, code or default), on four tabs: sign-in methods and what the sign-in page shows, registration, password rules and the three conditions for password recovery (`auth.passwordReset.enabled`, a mail sender, `app.publicOrigin`), and sessions and security. Problems to fix are listed at the top. Every section has a "How to change" snippet; the page saves nothing. Each sign-in method that is not configured has a "How to enable" guide, and every guide ends in an editable prompt the administrator copies to a development agent working in the application's repository; the page saves nothing. `/settings/authentication/sso` (`?type=sso` or `?type=social`) chooses the identity provider and the first sign-in, shows the callback URL, `<app.publicOrigin><base path>/api/auth/callback/<id>` for social and `genericOAuth()` providers alike, and builds a prompt that follows both choices: client id and secret from `AUTH_<ID>_CLIENT_ID` and `AUTH_<ID>_CLIENT_SECRET`, `account.accountLinking.disableImplicitLinking: true` so a provider sign-in is never linked to an existing user by email (a signed-in person still links it explicitly), and the provider's `disableSignUp: true` for "existing accounts only", which also refuses an explicit sign-up request. The client secret is never typed into it. `/settings/authentication/two-factor` and `/settings/authentication/passkey` build prompts for `twoFactor()` and for `passkey()` from `@better-auth/passkey`, with the migration from [Enabling an official Better Auth plugin](better-auth-plugins.md#two-factor-authentication-and-passkeys), `rpID` and `origin` read from `app.publicOrigin`, and the Account and security sections and sign-in steps this plugin does not provide. Every prompt is filled in with the application's name and `app.publicOrigin`, or the address being browsed with a warning when it is not set. The sign-in page entries list a configured provider only when the application names it in `authentication({ signInButtons })`, because the application's own sign-in page renders the buttons.
+- **Account and security**, Personal settings › Account (`/me/security`), for every signed-in person. It shows the username and email, changes the password (with "Sign out of other devices"), lists signed-in devices with sign-out for one or all others, and links or unlinks the single sign-on and social providers `GET /api/authentication/providers` lists; the last way to sign in cannot be unlinked. It calls only Better Auth's `changePassword`, `listSessions`, `revokeSession`, `revokeOtherSessions`, `listAccounts`, `linkSocial` (Better Auth 1.7 registers `genericOAuth()` providers as social providers, so they link the same way) and `unlinkAccount`, which act on the session's own user. A password counts as a remaining way to sign in only while the application publishes `auth.emailAndPassword.enabled` as on, which `defineAuthConfig` does; without it the page keeps the last provider linked.
+
+Replace a page as a whole, keeping its route, path and permission:
+
+```ts
+// client/plugins.ts
+authentication({
+  settingsComponentLoader: () => import('./pages/settings/authentication.js'),
+  accountSecurityComponentLoader: () => import('./pages/me/security.js'),
+}),
+```
+
+or pass `routeComponentOverrides` to the runtime with `AUTHENTICATION_SETTINGS_ROUTE_ID`, `AUTHENTICATION_SSO_GUIDE_ROUTE_ID`, `AUTHENTICATION_TWO_FACTOR_GUIDE_ROUTE_ID`, `AUTHENTICATION_PASSKEY_GUIDE_ROUTE_ID` or `ACCOUNT_SECURITY_ROUTE_ID` from `@nocobase/app-plugin-authentication/client`. A replacement reads the same routes; it must not show any value the settings route does not return.
+
+Another plugin adds a row to the sign-in methods list on the server with `signInMethodsToken` (see the plugin's SKILL.md); the page needs no change.

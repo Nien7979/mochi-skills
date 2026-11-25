@@ -1,0 +1,92 @@
+# Operations and Verification
+
+## The Business Administrator's Routine
+
+Developers maintain schedule definitions and execution logic. Business administrators use the Schedules settings page the plugin registers to track executions. Use meaningful business titles and descriptions, and reflect actual progress and final outcomes. Do not display asynchronous work as successful merely because it was queued.
+
+Validate using an administrator account with the appropriate permissions: the task must be discoverable, execution records accessible, and final status consistent with business results. Background logs or successful dispatch receipts alone do not deliver this observability requirement.
+
+## Management Entry Points
+
+The plugin registers the System settings page **Schedules** at `/settings/automation/schedules`, in the built-in automation category, with three tabs: Tasks (state, next and last run, totals, pause and resume, each Schedule's detail and runs), Runs (the history of every Schedule, filtered by Schedule, result and time range) and Configuration (the jobs configuration Schedules run on, read-only, and the Schedules still active in the database that the running code no longer defines). An application only registers the plugin; it does not build its own Schedules page. To replace the page entirely, give `routeComponentOverrides` a component for the route id `@nocobase/app-plugin-scheduler:schedules`. Definitions are maintained in source. The API supports viewing and enabling/disabling tasks, with no route for creating or editing Cron definitions, and no route to run a task now or again.
+
+Permissions live on the settings item `scheduler.schedules`, titled Schedules in the role editor, with two actions: `read` opens the page and every `GET` route below, and `manage` is required in addition to enable or disable a task. The page hides the switch from a role without `manage`. Every route requires authentication and checks its action before the schedule is looked up.
+
+| Method and path                                        | Action   | Response / effect                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/scheduler/schedules`                         | `read`   | `{ data: ScheduleListItem[], meta: { page, pageSize, total, jobs } }`; `page` (default 1) and `pageSize` (default 20, at most 100). `meta.jobs` describes the jobs configuration and lists `removedFromCode`                                                            |
+| `GET /api/scheduler/schedules/:scheduleId`             | `read`   | `{ data: ScheduleListItem & { upcomingRuns } }`; `upcomingRuns` holds the next three firing times of an active Schedule, within its window and run limit                                                                                                                |
+| `GET /api/scheduler/schedules/:scheduleId/occurrences` | `read`   | `{ data: ScheduleOccurrenceView[], meta: { nextPageToken? } }`, newest first; `pageSize` (default 20, at most 100) and `pageToken` from the previous page's `meta`                                                                                                      |
+| `GET /api/scheduler/occurrences`                       | `read`   | The occurrences of every Schedule of the application, newest first by planned time (`scheduledAt`), in the same shape; filters `scheduleId`, `status` (repeat for several), `from` and `to` (ISO times with an offset, on the planned time), `pageSize` and `pageToken` |
+| `POST /api/scheduler/schedules/:scheduleId/enable`     | `manage` | `{ data: ScheduleListItem }`; enables the task, no request body                                                                                                                                                                                                         |
+| `POST /api/scheduler/schedules/:scheduleId/disable`    | `manage` | `{ data: ScheduleListItem }`; pauses the task, no request body                                                                                                                                                                                                          |
+
+Failures use the standard `/api` error body with domain `scheduler`: a caller without `read` gets `403` with reason `SCHEDULE_ACCESS_REQUIRED`, a caller without `manage` who enables or disables gets `403` with reason `SCHEDULE_MANAGE_REQUIRED`, an id this application has no schedule for gets `404` with reason `SCHEDULE_NOT_FOUND`, and an invalid parameter or `pageToken` gets `400` with reason `INVALID_INPUT`. Treat `pageToken` as opaque; the last page has no `nextPageToken`. A token of one history route is not accepted by the other.
+
+`meta.jobs` names the `jobs` configuration Schedules use and what chose it (`scheduler.jobs`, `jobs.default` or the built-in memory configuration), its adapter, whether several instances may run Schedules, its concurrency and attempts, for a non-memory backend its namespace and address, and where each value comes from (`environment`, `config` or `default`). It never carries a password or any connection option beyond the address. `meta.jobs.removedFromCode` lists the code-defined Schedules still `active` in the database that this instance did not define at startup: they do not run when due, and `scheduler sync --finalize` on a complete build marks them inactive.
+
+The running application documents these routes under the `Scheduler` tag at `/api/swagger/docs` (JSON at `/api/swagger`, signed in), with the full `ScheduleListItem` and occurrence schemas; their operationIds are `schedulerListSchedules`, `schedulerGetSchedule`, `schedulerListOccurrences`, `schedulerListAllOccurrences`, `schedulerEnableSchedule` and `schedulerDisableSchedule`.
+
+Use the id returned by list for `:scheduleId`, not the definition key or a target config value. Enabling/disabling affects future scheduling; it does not cancel work already started.
+
+`schedulerServiceToken` from `@nocobase/app-plugin-scheduler/server/tokens` is the plugin's one public service, and it is a contribution surface rather than an administration one:
+
+```ts
+registerTarget<TConfig extends JsonObject>(
+  target: ScheduleTargetType<TConfig>,
+): ScheduleTargetHandle;
+
+defineSchedule(definition: ScheduleDefinition): void;
+```
+
+The returned handle carries `reportCompletion(occurrenceId, reference, completion)`, and completes only occurrences its own target started. `defineSchedule` has no return value; it validates and stores the definition in the in-memory manifest consumed by the next sync.
+
+Reading and changing schedules — list, history, enable and disable — is reachable through the HTTP API above, and synchronization through `pnpm nocobase scheduler sync`. Neither is exposed as a resolvable service: the store, the target registry and the schedule executor are private to the plugin, so an application cannot bypass the authorization its Routes enforce by resolving them from the container.
+
+## Interpret Permissions and State Separately
+
+List items include appName, id, key, sourceType, cron, timezone, from, to, limit, enabled, lifecycleState, scheduleStatus, targetState, targetSummary, runCount, completedCount, nextRunAt, lastRunAt and lastRun (the latest run's status, reason and finishedAt). The `read` and `manage` permissions authorize the management routes above; it does not make a target runnable or grant business credentials to its executor.
+
+| Dimension                      | Meaning and diagnostic boundary                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`                      | Administrator enable/disable setting, preserved by normal synchronization; `true` alone does not prove execution is possible.                                                                                                                                                                                                                                                                                                 |
+| `lifecycleState`               | `active` or `inactive`; finalization marks definitions removed from code inactive while retaining history. This is separate from temporary administrator disabling.                                                                                                                                                                                                                                                           |
+| `scheduleStatus`               | `active` when the definition is both enabled and `active` in its lifecycle, otherwise `paused`. It is derived rather than stored, and it is not a business execution result.                                                                                                                                                                                                                                                  |
+| Target readiness               | `targetState` and `targetSummary.state` describe `ready`, `disabled`, `missing`, or `invalid`. This is the target's readiness description, not proof that a worker is running or that every execution prerequisite passed.                                                                                                                                                                                                    |
+| Occurrence and business result | An occurrence's status/reason describes one execution. `waiting` means accepted asynchronous work; verify its real executor's terminal outcome and the resulting business data. `runCount` counts firings started, once per occurrence even when a start is redelivered, not successes; `completedCount` counts occurrences recorded as `succeeded`, which still depends on the adapter reporting truthful business outcomes. |
+
+When reviewing status or permissions, report these dimensions separately; neither access permission, `enabled: true`, `scheduleStatus: active`, nor target readiness proves business success.
+
+Execution history includes status, reason, executionCount, timestamps, controlled target references/receipts, and result summaries. List/API responses do not expose raw Job payloads or target input.
+
+## Verify Behavior
+
+Validate according to the change, beyond comparing synchronized Skill files:
+
+- The definition module imports, typechecks, and builds. Synchronization succeeds, and the list shows the expected key, timezone, and next execution.
+- In development, use a short Cron interval to observe an execution: a short target produces its business result and succeeds; asynchronous targets wait first and eventually reflect the real outcome.
+- Check actual status and reason for invalid payloads and missing/disabled targets. Successful synchronization does not prove input validity.
+- For asynchronous adapters, cover duplicate dispatch, the same reference for the same occurrence, successful completion, terminal failure after retries, and recovery through inspection after a lost notification. Verify the target's executor runs the submitted job on the selected `jobs` configuration and produces the expected business result; a successful submission alone is insufficient.
+- Confirm enable/disable settings survive normal synchronization. Test finalization of removed definitions only in an authorized test environment.
+- For custom pages or Routes, verify anonymous, unauthorized, and authorized access. Run relevant application lint, typecheck, tests, and build, and report unverified external-system boundaries.
+
+Do not trigger production business effects merely to validate integration. Use a development environment or the application's existing test adapter.
+
+## Diagnose Problems
+
+- **Command missing:** check the Scheduler CLI contribution in `cli/plugins.ts`.
+- **Definition absent:** first confirm the target application root, actual running `appName`, environment/database, and UI/API endpoint are the same ones used for synchronization. In that application, call `GET /api/scheduler/schedules`, match `appName` and the exact schedule `key`, and use the returned `id` for history and enable/disable routes. A renamed application or key has a different persistent identity; environment selects the deployment/database rather than adding a field to that identity. If the row is still absent, check that the registering Provider actually runs — it is listed in `server/providers/index.ts` or its plugin's `serviceProviders`, the `.has(schedulerServiceToken)` guard did not skip it because Scheduler is not installed, and `defineSchedule()` is called from `register()`/`boot()` rather than `start()` or later.
+- **Startup failure:** check that the application composes `JobExecutorServiceProvider`, which `jobs` configuration applies — `scheduler.jobs` when it is set, otherwise `jobs.default`; a `scheduler.jobs` naming no `jobs` configuration stops the start — (the Redis connection for `redis`; for `memory`, whether `storage/jobs` is readable and its state file valid, which the error names), migrations, duplicate keys/types, Provider boot registration, and manifest validation errors.
+- **No trigger:** check nextRunAt, timezone, from/to, limit, enablement, and lifecycleState, then confirm the application and worker are running. The sync-only command is not a background daemon. The `memory` adapter serves one process: every process or instance fires its own copy, and one that was killed rather than stopped lost the changes since it started, so a deployment of several instances needs the `redis` adapter.
+- **Warning "A schedule fired that this instance has no definition for":** the backend held a rule this instance has no definition for, such as during a rolling deployment or after a definition was removed from code. No occurrence is recorded and the firing is not retried. Run `--finalize` once the complete manifest is deployed; the rule is removed then, and every later start removes it again should that removal have been lost. A definition that is still active in the database keeps its rule until then.
+- **Stuck waiting:** follow the target reference and inspect the real executor, completion notification, and observer. Scheduler's periodic reconciliation does not run the target's job.
+- **Historical occurrence after retargeting:** use the occurrence's recorded target type and reference, not the definition's current target. Follow [Historical Occurrences After Retargeting](targets.md#historical-occurrences-after-retargeting) before assessing a completion callback.
+- **Historical triggered status:** this only indicates that a target previously accepted a request, not successful completion. runCount is not a success count either.
+
+## Shutdown and dependency lifetime
+
+Resolve the public `schedulerServiceToken` and call its service’s `drain()` before closing services that schedule targets use. A final application provider can call it during reverse-order shutdown. Keep dependencies alive until it settles, and propagate errors. The plugin's own final shutdown reuses the same promise; never obtain its private executor or scope to implement this boundary.
+
+Drain stops new reconciliation, waits for accepted checks and the configured executor's state persistence/event delivery, then closes completion-report admission and waits for accepted reports and event records before releasing subscriptions. Reports during the producer-draining phase remain accepted; later reports reject before storage access. Concurrent/repeated calls reuse success or failure without restarting. It does not wait for durable waiting work or human approval, and the host still owns HTTP admission and other business executors. Do not call and await drain from work it must itself await.
+
+Use a Jobs revision with failure-safe Schedule event draining together with this Scheduler contract. Verify both normal and failing shutdown with an in-flight target and reconciliation, and assert that dependency cleanup follows their completion. A successful close alone does not prove dependency lifetime. No additional queries, persistent writes or locks are introduced by the tracking itself; existing state and event persistence still has a real shutdown cost.

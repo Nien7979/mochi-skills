@@ -1,0 +1,170 @@
+---
+title: skill
+sidebarTitle: skill
+---
+
+# `fastmcp.skills.skill`
+
+
+Storage-neutral agent skills.
+
+## Classes
+
+### `SkillFile` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/skills/skill.py#L83" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+
+One file of a skill, described by its digest and size instead of its bytes.
+
+
+### `SkillManifest` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/skills/skill.py#L92" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+
+A skill's frontmatter and files, without the files' contents.
+
+A provider can advertise a skill from its manifest and read a file only when
+a client reads it. See `SkillManifestProvider`.
+
+
+**Methods:**
+
+#### `validate_files` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/skills/skill.py#L106" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+validate_files(self) -> Self
+```
+
+#### `to_mcp_skill` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/skills/skill.py#L110" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+to_mcp_skill(self, path: str | None = None) -> MCPSkill
+```
+
+Build the Skills extension entry for this skill served at `skill://{path}/`.
+
+
+### `Skill` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/skills/skill.py#L149" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+
+An agent skill: a `SKILL.md` plus supporting files, independent of storage.
+
+A `Skill` holds exact file bytes. It doesn't know where it came from or which
+URI it is served under; a provider decides that. Author one in Python with the
+keyword constructor, or snapshot one from a directory, package, or mapping of
+files.
+
+
+**Methods:**
+
+#### `model_validate` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/skills/skill.py#L198" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+model_validate(cls, obj: Any, **kwargs: Any) -> MCPSkill
+```
+
+Deprecated 4.1 alias for `MCPSkill.model_validate`.
+
+
+#### `model_validate_json` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/skills/skill.py#L204" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+model_validate_json(cls, json_data: str | bytes, **kwargs: Any) -> MCPSkill
+```
+
+Deprecated 4.1 alias for `MCPSkill.model_validate_json`.
+
+
+#### `from_files` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/skills/skill.py#L263" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+from_files(cls, files: Mapping[str, str | bytes]) -> Skill
+```
+
+Create a skill from relative paths mapped to text or bytes.
+
+`files` must include `SKILL.md` with valid frontmatter.
+
+
+#### `from_directory` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/skills/skill.py#L273" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+from_directory(cls, path: str | os.PathLike[str]) -> Skill
+```
+
+Read a skill folder once and return an immutable snapshot.
+
+The folder name must match the `name` in its `SKILL.md`. Symlinks and
+special files are rejected, so a snapshot never reaches outside the folder.
+
+
+#### `from_package` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/skills/skill.py#L293" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+from_package(cls, package: str, path: str) -> Skill
+```
+
+Load a skill folder shipped as package data, such as `("my_pkg", "skills/review")`.
+
+
+#### `to_directory` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/skills/skill.py#L319" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+to_directory(self, path: str | os.PathLike[str]) -> Path
+```
+
+Write the skill's files into `path`, a folder named after the skill.
+
+The folder name must match the skill's `name`, so `from_directory` can
+read it back. An existing folder raises `FileExistsError` unless
+`overwrite` is set, in which case it is replaced: files that aren't
+part of the skill are removed. Files are staged before replacing an
+existing folder. If replacement and restoration both fail, the error
+identifies where the previous folder has been retained.
+
+
+#### `name` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/skills/skill.py#L376" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+name(self) -> str
+```
+
+#### `description` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/skills/skill.py#L380" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+description(self) -> str
+```
+
+#### `frontmatter` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/skills/skill.py#L384" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+frontmatter(self) -> SkillFrontmatter
+```
+
+A copy of the parsed frontmatter; changing it does not change the skill.
+
+
+#### `manifest` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/skills/skill.py#L389" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+manifest(self) -> SkillManifest
+```
+
+A copy of the skill's frontmatter and file digests; changing it does not change the skill.
+
+
+#### `files` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/skills/skill.py#L394" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+files(self) -> Mapping[str, bytes]
+```
+
+Every file in the skill, keyed by relative path, including `SKILL.md`.
+
+
+#### `to_mcp_skill` <sup><a href="https://github.com/PrefectHQ/fastmcp/blob/main/fastmcp_slim/fastmcp/skills/skill.py#L398" target="_blank"><Icon icon="github" style="width: 14px; height: 14px;" /></a></sup>
+
+```python
+to_mcp_skill(self, path: str | None = None) -> MCPSkill
+```
+
+Build the Skills extension entry for this skill served at `skill://{path}/`.
+

@@ -1,0 +1,104 @@
+# Plugins in an application
+
+Read this before registering, updating, customizing or removing a plugin, and before building a feature an installed plugin may already provide.
+
+## Read a plugin's Skill before building what it already does
+
+**You are not starting from scratch.** This application ships with NocoBase packages that already solve whole categories of requirement, and packages may publish a Skill explaining how to use them. `pnpm nocobase skills sync` copies Skills from direct `@nocobase/*` and `@scope/app-plugin-*` dependencies and registered plugins into `.agents/skills/`. Before implementing a feature, check whether an installed and registered plugin already covers it:
+
+| The requirement sounds like                                                                  | Read the Skill for                                                                                                                        |
+| -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Email, IM, or in-app messages; notifying someone that something happened                     | `@nocobase/app-plugin-notification`                                                                                                       |
+| Knowledge bases, document spaces, search and document review                                 | `@nocobase/app-plugin-knowledge`; follow [knowledge integration](#knowledge-base-integration)                                             |
+| Approval processes, joint decisions and approval tasks                                       | `@nocobase/app-plugin-approval` (commercial Pro plugin; check [prerequisites](lifecycle.md#approval-requests-check-the-pro-plugin-first)) |
+| Roles, permissions, "user A may only see their own records", field-level or row-level access | `@nocobase/app-plugin-authorization`                                                                                                      |
+| Sign-in, registration, sessions, password reset                                              | `@nocobase/app-plugin-authentication`                                                                                                     |
+| User listing, account state, password reset, and application-owned role assignment           | `@nocobase/app-plugin-users`                                                                                                              |
+| File upload and metadata through Repository                                                  | `@nocobase/app-plugin-file`                                                                                                               |
+| Translated text and language switching                                                       | `@nocobase/app-plugin-i18n`                                                                                                               |
+
+Run `pnpm nocobase skills sync` if `.agents/skills/` is missing or looks out of date, then read the Skill for the plugin you need. It documents that plugin's public entries, the ownership boundary, and how to verify the result — which is faster and more correct than inferring an API from its source.
+
+Building a permission system, a notification sender, or a job scheduler by hand when a registered plugin already provides one is the most expensive mistake available here. Prefer the plugin; write your own only when you have read its Skill and confirmed it genuinely does not fit.
+
+`.agents/skills/` is generated output: gitignored, and every synchronized package-owned directory is replaced wholesale on the next sync, so never edit a file there. The same sync mirrors each synchronized directory into `.claude/skills/` as a symbolic link, because Claude Code discovers skills only there; that mirror is generated and gitignored too. Put application-specific guidance in the application's committed `.agents/rules/`, linked from its `AGENTS.md`.
+
+## Knowledge base integration
+
+When requirements include a knowledge base, document spaces, versioned articles/files, document proposals/review or knowledge search, first inspect `@nocobase/app-plugin-knowledge` and its runtime registration. For required installation or updates, follow [commercial package access](#commercial-package-access) for this package: automatically probe pkg-v3 with existing credentials and install/register a compatible accessible version without prompting. If access is unavailable, leave a brief conversation notice and continue independent work; keep knowledge integration pending rather than building a substitute document/search engine.
+
+Read the synchronized plugin Skill when available. A package without a Skill is not an unavailable plugin: inspect its installed `README.md`, `docs/` and public exports before integration. Verify the target version's configuration and access contracts, and distinguish built-in document/keyword search from optional indexing or semantic-search backends. Check each required backend package separately; knowledge package access does not establish authorization for an additional package or availability of a configured model/indexer.
+
+## The composition roots
+
+Plugins are registered in `client/plugins.ts`, `server/plugins.ts`, and `cli/plugins.ts`. Presence in the array enables a plugin and array order is contribution order. A plugin appears in the roots matching what it ships, so a plugin with only commands is listed in `cli/plugins.ts` alone. Bulk Skills synchronization and plugin updates discover plugins from these composition roots.
+
+Skills synchronization reads direct `@nocobase/*` and `@scope/app-plugin-*` dependencies from the application manifest and retains compatibility with explicitly registered plugins. It does not make an unregistered runtime plugin active; the composition roots remain the authority for registration and contribution order.
+
+Let `pnpm nocobase plugin register` and `pnpm nocobase plugin unregister` add and remove entries. Edit these files by hand only to reorder entries or to pass a plugin its options.
+
+## Creating an application-local plugin
+
+Keep ordinary application code in the application. Use an internal shared package for code consumed through imports alone; use a plugin for a capability with explicit Client, Server or CLI contributions. Both may live in the application's `packages/` workspace without an npm release. See [internal packages](internal-package-example.md) for the ordinary shared-package workflow.
+
+Use `@nocobase/create-plugin` from this installed application, not a NocoBase source checkout. Select only the required capabilities and inspect the plan before applying it:
+
+```bash
+pnpm dlx @nocobase/create-plugin demo-tools --with cli --dry-run --json
+pnpm dlx @nocobase/create-plugin demo-tools --with cli
+pnpm --filter @nocobase/app-plugin-demo-tools check
+pnpm nocobase plugin register @nocobase/app-plugin-demo-tools --no-install
+pnpm nocobase demo-tools info --json
+```
+
+The App-aware generator identifies `nocobase.templateKind: app`, writes `packages/app-plugin-demo-tools/`, preserves workspace configuration and adds a `workspace:*` application dependency. It resolves external dependency versions from the installed application and makes the local plugin private. A dry run also reports project-file edits and resolved dependency versions; no files are written or dependencies installed. If the installed generator still points at `packages/plugins/` or `app-template-default`, use a release that supports application workspaces rather than moving files and rewriting dependency protocols manually.
+
+A full package name such as `@my-company/app-plugin-demo-tools` keeps the chosen scope; use that full name for registration with a compatible App CLI. Runtime registration remains separate from generation and installation. `--no-install` postpones installation; run `pnpm install` before registration. Missing or incompatible dependencies must be resolved in the application first. Read the generated plugin's `AGENTS.md`, implement and test its behavior, preserve the application's existing registrations, and verify its real use in the application as well as `pnpm build`.
+
+## Installing and updating
+
+Install plugins with `pnpm nocobase plugin register <name>`. Name several to enable a plugin together with the plugins it requires, the required ones first: `pnpm nocobase plugin register agents knowledge`. System settings › System › Plugins lists every plugin the application declares, whether it is enabled, and the command that enables, updates or disables it; `pnpm nocobase plugin inspect <name>` reports the same state, including a plugin registered on only one of its Client and Server sides (`PARTIALLY_REGISTERED`). Enabled application plugins belong in `dependencies`, including client-only plugins. Preinstalled plugins belong in devDependencies and provide Skills. Run `pnpm nocobase plugin register <name>` to enable one. Run `plugin unregister <name>` to retain it for development or `plugin remove <name>` to uninstall it together with its synchronized Skills. Plugin frontend libraries remain peers and are not automatically installed in the deployment. Re-registering migrates legacy `devDependencies` entries while preserving the declared range; verify the manifest and lockfile afterward. With an older CLI, use `pnpm add --save-prod <package>@<declared-range>` to correct the declaration; `--no-install` leaves lockfile synchronization to the caller.
+
+For a commercial plugin, follow [commercial package access](#commercial-package-access) before installation or update; registry access is checked automatically, without a separate licensing prompt.
+
+To update a registered plugin, use `pnpm nocobase plugin update @nocobase/app-plugin-authentication`, or omit the name to update all registered plugins. Prefer the full package name; `authentication` is also accepted as a short name. The name is a positional argument, not `--plugin`. Use `--dry-run` to preview. With pnpm, updates stay within declared version ranges; after a successful update, all registered plugin Skills are re-synchronized. See the Plugins section of the application's `README.MD` for version-range behavior and examples.
+
+## Commercial package access
+
+Apply this workflow to every required NocoBase Pro package, including approval and Redis backend plugins, commercial database drivers and commercial packages introduced later. It applies to installation and updates; do not probe or install unrelated commercial packages. First inspect the application's installed packages, registrations and synchronized Skills. A missing runtime registration does not require downloading an already compatible installed package again.
+
+Automatically request the required package's metadata from `https://pkg-v3.nocobase.com/` in the application directory using existing npm/pnpm credentials. Registry health, access to a public package or access to another commercial package does not establish authorization for this package. For example, replace `<package>` with the actual package name:
+
+```bash
+env 'npm_config_@nocobase:registry=https://pkg-v3.nocobase.com/' npm_config_registry=https://pkg-v3.nocobase.com/ pnpm view <package> versions --json
+```
+
+Keep both registry overrides local to the command so an existing scoped registry cannot redirect the request to public npm or another registry, and let the install subprocess inherit them. Reuse credentials already configured for pkg-v3 without printing tokens or copying credentials between hosts. Use a bounded request timeout/retry policy; do not repeatedly probe a denied package. Successful metadata access is the package-access signal for automatic installation, not proof that every version is compatible or that installation has succeeded. Inspect the selected version's metadata and peer requirements with `view <package>@<compatible-version> --json` under the same overrides; preserve the application's declared range and installed runtime compatibility instead of blindly choosing `latest`.
+
+When access and a compatible version are available, automatically download and install the package without asking for confirmation or displaying a licensing/install prerequisite prompt. For a new plugin, use:
+
+```bash
+env 'npm_config_@nocobase:registry=https://pkg-v3.nocobase.com/' npm_config_registry=https://pkg-v3.nocobase.com/ pnpm nocobase plugin register <package> --version <compatible-version>
+```
+
+For an existing plugin update, use `pnpm nocobase plugin update <package>` under the same registry overrides and the supported declared range. For a non-plugin package such as a database driver, use `pnpm add --save-prod <package>@<compatible-version>` under the same overrides; do not run plugin registration on it. Verify the manifest, lockfile, applicable runtime registrations and configuration. Synchronize Skills with `pnpm nocobase skills sync` if needed and read the installed package's Skill before using its APIs. Verify actual runtime behavior separately from package access and installation.
+
+If the registry explicitly denies authorization, leave one brief conversation notice that commercial authorization for the named package is unavailable to the current environment and its integration remains pending. Missing credentials mean authorization could not be verified; a timeout, network failure, server error, 404 or lack of a compatible version is an access/version issue, not proof that the user has no commercial license. A download or registration failure after a successful probe is an installation failure; report that concrete reason accurately.
+
+In all unavailable cases, continue the current agent's independent work immediately: do not ask the user to purchase, log in, supply a token or approve installation, and do not end the turn or wait for a response. The conversation notice lets the user decide what to do later. Keep package-dependent work explicitly pending and existing working configuration intact. Do not claim completion, invent package APIs, build a substitute or silently switch to a backend/dialect that cannot meet the requested deployment or business requirements.
+
+## Customizing a page a plugin owns
+
+To replace a plugin page at the same address, pass `routeComponentOverrides` to `defineAppRuntime()` in `client/runtime.ts`. Use its package-qualified route ID, keep the replacement lazy, and supply a `componentEntry` for its default-exported component. The override preserves the route address, access, and children. For a route the application does not expose, set `excludedRouteIds` to its ID. The runtime removes the route and its descendants before claiming paths, so the application can add an owned route at the same address with its own access and metadata. See [pages and routes](frontend/references/page.md#10-customize-a-plugins-pages).
+
+Use `headerActionOverrides` with `{ name, hidden: true }` to hide a registered toolbar entry while retaining its page. To customize the entry, use the same override with `component`, `order`, or `badge`. Register an application-owned entry with `headerActions`. An action that declares a `routeId` appears in the standard shells only while its target page is registered and the viewer has access to it. The framework reports missing or group targets during runtime setup. The action's `order` controls placement, and an application can override it by name. On phones the standard templates fold extra actions into More.
+
+Authentication pages are not plugin-owned: `/login`, `/register`, `/forgot-password`, and `/reset-password` are application routes declared in `client/routes.ts`. Authentication pages in `client/pages/auth/` use relative links and the authentication plugin's `client/actions` hooks; do not call authentication endpoints directly or create a second session store.
+
+## Removing a direct NocoBase package
+
+Before removing an `@nocobase/*` dependency, search the application's imports, Client/Server/CLI plugin registrations, routes, services, configuration, tests, and build scripts for the package name and the contracts it provides. Migrate or remove those references first. `package remove` updates dependency metadata and generated Skills; it does not rewrite application code or configuration and cannot decide whether the capability is still needed, so never use it to remove a capability the application still needs.
+
+Run `pnpm nocobase package remove @nocobase/example`. The command uses the application's package manager to update `package.json` and the lockfile, then removes only synchronized Skills recorded as owned by that package. An `@nocobase/app-plugin-*` target delegates to the plugin remove workflow so its Client, Server, and CLI registrations are removed together; `pnpm nocobase plugin remove <name>` remains available. Use `--dry-run` before a consequential removal and `--json` when structured output is needed.
+
+After an interrupted or manual removal, verify that the manifest no longer declares the package and run a full `pnpm nocobase skills sync` to reconcile stale package-owned output. Passing an already-absent package to `package remove` cleans recorded historical Skill ownership without uninstalling or cleaning another package.
